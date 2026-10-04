@@ -28,6 +28,17 @@ if [[ -z "${GITHUB_REPO:-}" ]]; then
     exit 1
 fi
 
+# GitHub's OIDC token names this repository by immutable IDs as well as names:
+# repo:OWNER@OWNER_ID/REPO@REPO_ID:ref:refs/heads/main. Pinning the IDs means a
+# repository deleted and recreated under the same name cannot inherit this
+# trust. The IDs come from GitHub's public API, so only owner/repo is needed.
+SUBJECT_REPO="$(curl -fsS "https://api.github.com/repos/${GITHUB_REPO}" | python3 -c '
+import json, sys
+r = json.load(sys.stdin)
+print("{}@{}/{}@{}".format(r["owner"]["login"], r["owner"]["id"], r["name"], r["id"]))
+')" || { echo "ERROR: could not look up ${GITHUB_REPO} on api.github.com. Is it public?" >&2; exit 1; }
+SUBJECT="repo:${SUBJECT_REPO}:ref:refs/heads/main"
+
 PROVIDER_ARN="arn:aws:iam::${ACCOUNT_ID}:oidc-provider/token.actions.githubusercontent.com"
 
 # ---------------------------------------------------------------------------
@@ -60,7 +71,7 @@ TRUST="$(cat <<JSON
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
       },
       "StringLike": {
-        "token.actions.githubusercontent.com:sub": "repo:${GITHUB_REPO}:ref:refs/heads/main"
+        "token.actions.githubusercontent.com:sub": "${SUBJECT}"
       }
     }
   }]
@@ -71,11 +82,11 @@ JSON
 if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
     aws iam update-assume-role-policy --role-name "$ROLE_NAME" \
         --policy-document "$TRUST" >/dev/null
-    echo "Updated trust policy on ${ROLE_NAME}"
+    echo "Updated trust policy on ${ROLE_NAME} for ${SUBJECT}"
 else
     aws iam create-role --role-name "$ROLE_NAME" \
         --assume-role-policy-document "$TRUST" >/dev/null
-    echo "Created ${ROLE_NAME}"
+    echo "Created ${ROLE_NAME} for ${SUBJECT}"
 fi
 
 # ---------------------------------------------------------------------------
