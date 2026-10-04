@@ -11,8 +11,7 @@ A reusable sales warehouse for my convention booth. Each convention I vend at ru
 through the same ELT pipeline and lands as its own event, with no code changes;
 Sakura-Con 2026 is the first. Python pulls orders from the Square API, archives the
 raw JSON to S3, and loads Redshift Serverless; dbt builds and tests a star schema;
-the job runs daily as a container on ECS Fargate, deployed by GitHub Actions with
-no stored AWS keys. Two public Tableau dashboards sit on top.
+the job runs daily as a container on ECS Fargate, deployed by GitHub Actions. Currently, two public Tableau dashboards sit on top.
 
 ![Sales dashboard](docs/img/sales-dashboard.png)
 
