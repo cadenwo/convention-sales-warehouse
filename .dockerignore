@@ -1,0 +1,29 @@
+# Secrets must never enter an image layer — a .env baked in is recoverable
+# from the image by anyone who can pull it, even if a later layer deletes it.
+.env
+.env.*
+
+# Local artefacts
+.git
+.gitignore
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+build/
+_to_delete/
+
+# dbt local state
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Not needed at runtime
+tests/
+docs/
+README.md
+requirements-dev.txt
+
+# Source data stays out of the image; the container pulls from the API.
+RAW DATA/

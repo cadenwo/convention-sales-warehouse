@@ -1,0 +1,12 @@
+# Extract / load
+squareup>=45.0
+tenacity>=8.2
+psycopg2-binary>=2.9
+boto3>=1.34
+pandas>=2.0
+python-dotenv>=1.0
+
+# Transform
+dbt-core==1.12.3
+dbt-redshift==1.11.1
+dbt-postgres==1.11.0

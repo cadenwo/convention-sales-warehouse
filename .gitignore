@@ -1,0 +1,27 @@
+build/
+.env
+*.pyc
+__pycache__/
+.DS_Store
+*.twbr
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Local CSV exports of the marts, for a BI tool that cannot reach Redshift.
+# These carry the booth's actual revenue; the published dashboard indexes it
+# deliberately, so the raw figures stay off the repo.
+exports/
+
+# Tableau working files. A .twb references a live connection; a .twbx embeds
+# the extract — and therefore the revenue.
+*.twb
+*.twbx
+*.hyper
+
+# Local tooling
+.venv/
+.pytest_cache/
+dbt/.user.yml
