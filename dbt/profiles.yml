@@ -1,0 +1,26 @@
+# Connection details come from the environment, never from this file, so it is
+# safe to commit. The same profile targets Redshift in production and a local
+# Postgres for development — dbt abstracts the dialect differences.
+sakuracon:
+  target: "{{ env_var('DBT_TARGET', 'dev') }}"
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('PGHOST') }}"
+      port: "{{ env_var('PGPORT', '5432') | int }}"
+      user: "{{ env_var('PGUSER') }}"
+      password: "{{ env_var('PGPASSWORD') }}"
+      dbname: "{{ env_var('PGDATABASE') }}"
+      schema: public
+      threads: 4
+
+    prod:
+      type: redshift
+      host: "{{ env_var('PGHOST') }}"
+      port: "{{ env_var('PGPORT', '5439') | int }}"
+      user: "{{ env_var('PGUSER') }}"
+      password: "{{ env_var('PGPASSWORD') }}"
+      dbname: "{{ env_var('PGDATABASE') }}"
+      schema: public
+      threads: 4
+      sslmode: require

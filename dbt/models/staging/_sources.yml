@@ -1,0 +1,29 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Landing tables written by the Python extract-load job. dbt never writes
+      here — it only reads. Keeping the boundary explicit means the EL job and
+      the transform can fail independently and be diagnosed separately.
+    # Physical schema is raw_data: RAW is a Redshift reserved word. The dbt
+    # source is still called `raw`, so models read source('raw', ...) — the
+    # logical name and the physical schema deliberately differ here.
+    schema: raw_data
+    tables:
+      - name: sales_line_items
+        description: One row per order line item, as pulled from the Square Orders API.
+        columns:
+          - name: transaction_id
+            description: Square order id. Not unique here — an order with three items produces three rows.
+            data_tests:
+              - not_null
+          - name: sale_date
+            data_tests:
+              - not_null
+          - name: item
+            data_tests:
+              - not_null
+          - name: net_sales
+            data_tests:
+              - not_null
