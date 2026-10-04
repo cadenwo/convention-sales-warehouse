@@ -1,0 +1,129 @@
+name: CI / Deploy
+
+# Tests run on every push to main and every pull request against it. Deployment
+# happens only from main, and only if the tests passed — `needs: test` is what
+# makes that a guarantee rather than a convention.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # A second push while a deploy is running would race to register task
+  # definition revisions. Cancel the older run rather than interleaving them.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Must match the Dockerfile. dbt requires 3.10+, and a version skew
+          # between CI and the image means CI can pass on code that will not
+          # even import in production.
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run unit tests
+        # No credentials of any kind. The suite fakes every API response, which
+        # is what lets it run on a pull request from a fork.
+        run: python -m pytest tests/ -v
+
+      - name: Check dbt project parses
+        # Catches a malformed model or a broken ref() without needing a
+        # warehouse connection.
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGDATABASE: placeholder
+          PGUSER: placeholder
+          PGPASSWORD: placeholder
+          DBT_TARGET: dev
+        run: python -m dbt.cli.main parse --project-dir dbt --profiles-dir dbt
+
+  deploy:
+    name: Build and push
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    # Required for OIDC: `id-token: write` lets the job request a signed
+    # identity token from GitHub, which AWS exchanges for temporary credentials.
+    # No AWS keys are stored anywhere in this repository.
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: us-east-1
+      ECR_REPOSITORY: sakuracon-pipeline
+      TASK_FAMILY: sakuracon-pipeline
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        id: build
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          # Tag with the commit SHA, never :latest. This is what makes a
+          # CloudWatch log line traceable back to an exact diff months later.
+          TAG: ${{ github.sha }}
+        run: |
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:$TAG"
+          docker build --platform linux/amd64 -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Register task definition
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          # Take the current task definition, swap in the new image, and
+          # register it as a new revision. Editing the live definition in place
+          # would destroy the ability to roll back to the previous image.
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_FAMILY" \
+            --query taskDefinition > current.json
+
+          python - <<'PY'
+          import json
+          task = json.load(open("current.json"))
+          import os
+          task["containerDefinitions"][0]["image"] = os.environ["IMAGE"]
+          for field in ("taskDefinitionArn", "revision", "status",
+                        "requiresAttributes", "compatibilities",
+                        "registeredAt", "registeredBy"):
+              task.pop(field, None)
+          json.dump(task, open("new.json", "w"))
+          PY
+
+          REVISION=$(aws ecs register-task-definition \
+            --cli-input-json file://new.json \
+            --query 'taskDefinition.revision' --output text)
+
+          echo "Registered ${TASK_FAMILY}:${REVISION} with image ${IMAGE}"
+          echo "### Deployed \`${TASK_FAMILY}:${REVISION}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Image: \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
