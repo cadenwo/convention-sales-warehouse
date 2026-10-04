@@ -1,0 +1,48 @@
+version: 2
+
+# Unit tests run on fixed, hand-written rows instead of warehouse data. They
+# cover behaviour the real data cannot exercise: the account currently holds
+# one convention, so nothing in it can prove a second convention's baskets
+# stay separate from the first's.
+
+unit_tests:
+  - name: pairs_stay_within_their_event
+    description: >
+      The same pair sold at two conventions produces two rows, not one summed
+      row. The fixture also pins the invariants the model relies on: an item
+      scanned twice in one basket is counted once and never pairs with itself,
+      each pair is stored in one direction only, and a non-trading day
+      contributes nothing.
+    model: fact_item_pairs
+    given:
+      - input: ref('dim_date')
+        rows:
+          - {date_key: d1, event_key: e1, event_name: "Event 1", is_trading_day: true}
+          - {date_key: d2, event_key: e2, event_name: "Event 2", is_trading_day: true}
+          - {date_key: d0, event_key: e0, event_name: "Non-trading day", is_trading_day: false}
+      - input: ref('dim_item')
+        rows:
+          - {item_key: a, item_name: Alpha}
+          - {item_key: b, item_name: Beta}
+          - {item_key: c, item_name: Gamma}
+      - input: ref('fact_sales_line')
+        rows:
+          # Event 1: two baskets of Alpha + Beta; t1 scans Beta twice.
+          - {transaction_id: t1, item_key: a, date_key: d1}
+          - {transaction_id: t1, item_key: b, date_key: d1}
+          - {transaction_id: t1, item_key: b, date_key: d1}
+          - {transaction_id: t2, item_key: a, date_key: d1}
+          - {transaction_id: t2, item_key: b, date_key: d1}
+          # Event 2: one basket holding all three.
+          - {transaction_id: t3, item_key: a, date_key: d2}
+          - {transaction_id: t3, item_key: b, date_key: d2}
+          - {transaction_id: t3, item_key: c, date_key: d2}
+          # A terminal test on a non-trading day. Must not appear.
+          - {transaction_id: t0, item_key: a, date_key: d0}
+          - {transaction_id: t0, item_key: b, date_key: d0}
+    expect:
+      rows:
+        - {event_key: e1, item_a_key: a, item_b_key: b, pair_label: "Alpha  +  Beta", baskets: 2}
+        - {event_key: e2, item_a_key: a, item_b_key: b, pair_label: "Alpha  +  Beta", baskets: 1}
+        - {event_key: e2, item_a_key: a, item_b_key: c, pair_label: "Alpha  +  Gamma", baskets: 1}
+        - {event_key: e2, item_a_key: b, item_b_key: c, pair_label: "Beta  +  Gamma", baskets: 1}

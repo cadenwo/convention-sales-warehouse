@@ -1,0 +1,230 @@
+version: 2
+
+models:
+  - name: dim_category
+    description: One row per product category, including an explicit 'Uncategorized' member.
+    columns:
+      - name: category_key
+        description: Surrogate key — deterministic hash of category_name.
+        data_tests: [unique, not_null]
+      - name: category_name
+        data_tests: [unique, not_null]
+
+  - name: dim_item
+    description: >
+      One row per sellable item, keyed on COALESCE(sku, item_name) because
+      7 source rows carry no SKU.
+    columns:
+      - name: item_key
+        data_tests: [unique, not_null]
+      - name: item_natural_key
+        data_tests: [unique, not_null]
+      - name: category_key
+        description: FK to dim_category.
+        data_tests:
+          - not_null
+          # Redshift does not enforce foreign keys. This test does, at build time.
+          - relationships:
+              arguments:
+                to: ref('dim_category')
+                field: category_key
+      - name: item_name
+        data_tests: [not_null]
+
+  - name: dim_date
+    description: >
+      One row per date with recorded activity. Dates are grouped into events by
+      a 7-day gap rule and the day ordinal is numbered within its event, since
+      the account holds sales from more than one convention. A date whose total
+      takings fall below the cheapest catalog item is flagged non-trading and
+      excluded from event numbering — a pre-convention terminal test would
+      otherwise become a one-day event of its own.
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+      - name: full_date
+        data_tests: [unique, not_null]
+      - name: is_trading_day
+        description: >
+          False for dates that took less than the cheapest catalog item costs.
+          Analysis and dashboards filter on this rather than on a date literal.
+        data_tests: [not_null]
+      - name: convention_day
+        description: Day ordinal *within its event*, not across all dates.
+        data_tests: [not_null]
+      - name: event_key
+        description: >
+          Groups consecutive selling days into one convention. Non-trading
+          dates share the event 0 key rather than carrying a null.
+        data_tests: [not_null]
+      - name: event_name
+        data_tests: [not_null]
+      - name: day_in_event
+        data_tests: [not_null]
+
+  - name: fact_item_daily
+    description: >
+      Grain: one row per item per trading day, including days an item sold
+      nothing. dim_item crossed with the trading days from dim_date, with
+      actual sales joined on and absences filled with zero.
+
+      Exists because fact_sales_line has no row for an item that did not sell,
+      so day-over-day calculations return null exactly where the largest
+      declines are — an item going to zero disappears instead of showing a
+      drop. Zero-filling is valid here because fact_sales_line is a complete
+      record of sales on these dates, so absence provably means zero.
+    columns:
+      - name: item_day_key
+        data_tests: [unique, not_null]
+      - name: item_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: item_name
+        description: >
+          Carried from dim_item so this table needs one relationship rather
+          than three. dim_item remains the source of record.
+        data_tests: [not_null]
+      - name: convention_day
+        description: Carried from dim_date, same reason.
+        data_tests: [not_null]
+      - name: event_name
+        data_tests: [not_null]
+      - name: quantity
+        data_tests: [not_null]
+      - name: net_sales
+        data_tests: [not_null]
+      - name: transactions
+        data_tests: [not_null]
+      - name: sold_that_day
+        description: >
+          False on rows this model manufactured. Not redundant with
+          quantity = 0 — a refund line is a real row that nets to nothing,
+          which is a different fact from no sale at all.
+        data_tests: [not_null]
+
+  - name: fact_item_pairs
+    description: >
+      Grain: one row per unordered pair of items sold in the same transaction,
+      per event, with the number of baskets containing both. Market basket
+      analysis — what to bundle.
+
+      Built here rather than in the BI tool because it needs a self-join on
+      transaction_id, which would fan out the fact table for every other sheet
+      sharing the source. Filter it by item through bridge_item_pair, never on
+      item_a_key or item_b_key alone.
+    columns:
+      - name: item_pair_key
+        description: Surrogate key over event, item A and item B.
+        data_tests: [unique, not_null]
+      - name: event_key
+        description: >
+          The convention the pair was observed at. Part of the grain, so a
+          second event's baskets are never summed into the first's.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: event_key
+      - name: event_name
+        description: Carried from dim_date so a BI filter needs no extra relationship.
+        data_tests: [not_null]
+      - name: item_a_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+      - name: item_b_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+      - name: pair_label
+        description: >
+          "Item A  +  Item B", pre-built so a chart needs no calculated field.
+          Unique within an event rather than globally, since the same two items
+          can sell together at more than one convention. See
+          assert_pair_labels_unique_within_event.
+        data_tests: [not_null]
+      - name: baskets
+        description: Number of transactions containing both items.
+        data_tests: [not_null]
+
+  - name: bridge_item_pair
+    description: >
+      Grain: one row per item per pair — exactly two rows for every row in
+      fact_item_pairs. Resolves the many-to-many between items and pairs, so
+      filtering on an item finds every pair that contains it, not only the
+      pairs where hash order happened to store it as item A.
+    columns:
+      - name: pair_member_key
+        data_tests: [unique, not_null]
+      - name: item_pair_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fact_item_pairs')
+                field: item_pair_key
+      - name: item_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+
+  - name: fact_sales_line
+    description: >
+      Grain: one line item within an order. Additive measures only, plus
+      transaction_id as a degenerate dimension for basket analysis.
+    columns:
+      - name: sale_line_key
+        data_tests: [unique, not_null]
+      - name: transaction_id
+        data_tests: [not_null]
+      - name: item_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_item')
+                field: item_key
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: net_sales
+        data_tests: [not_null]
+      - name: quantity
+        data_tests: [not_null]
+      - name: hour_of_day
+        description: >
+          Hour of the sale in the location's local timezone, 0-23. Materialised
+          here because sale_time is a TIME column and Redshift cannot cast TIME
+          to TIMESTAMP, so BI tools cannot derive it themselves.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+                         12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+                quote: false
