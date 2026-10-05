@@ -91,7 +91,11 @@ from here on.
 
 ## Data model
 
-![Star schema: three dimensions, three fact tables, and a bridge table, with primary and foreign keys](assets/star-schema.png)
+The core is a star: `fact_sales_line` joined to `dim_item` and `dim_date`. The
+item-by-day fact, the basket pairs, and the bridge are built from that star for
+the dashboards.
+
+![Star schema: fact_sales_line at the center with dim_date above and dim_item below; the derived facts fact_item_daily and fact_item_pairs sit beside it, bridge_item_pair resolves pairs to items, and dim_category hangs off dim_item](assets/star-schema.png)
 
 | Table | Grain |
 |---|---|
