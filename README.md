@@ -13,12 +13,14 @@ Sakura-Con 2026 is the first. Python pulls orders from the Square API, archives 
 raw JSON to S3, and loads Redshift Serverless; dbt builds and tests a star schema;
 the job runs daily as a container on ECS Fargate, deployed by GitHub Actions. Currently, two public Tableau dashboards sit on top.
 
-![Sales dashboard](docs/dashboards/sales-dashboard.png)
+![Sakura-Con 2026 sales dashboard](dashboards/sakura-con-2026-sales-dashboard.png)
 
 | Live dashboard | |
 |---|---|
 | Sales: revenue trend, category share, product totals | [Tableau Public](https://public.tableau.com/app/profile/caden.wong/viz/SakuraConSalesDashboard/SalesDashboard) |
 | Analytics: daily sales, popularity changes, peak hours, bundles | [Tableau Public](https://public.tableau.com/app/profile/caden.wong/viz/SakuraConSalesDashboard/AnalyticsDashboard) |
+
+How they are designed, and why: [`docs/DASHBOARDS.md`](docs/DASHBOARDS.md).
 
 ---
 
@@ -55,7 +57,7 @@ this repository and the public dashboards.
 The layers map onto the medallion pattern: `raw_data` and the S3 archive are
 bronze, `staging` is silver, and the `warehouse` star schema is gold.
 
-![AWS infrastructure: EventBridge Scheduler runs an ECS Fargate task that reads credentials from Secrets Manager, pulls its image from ECR, archives to S3, and loads Redshift Serverless inside the default VPC; GitHub Actions deploys through an OIDC role](assets/aws_infra.png)
+![AWS infrastructure: EventBridge Scheduler runs an ECS Fargate task that reads credentials from Secrets Manager, pulls its image from ECR, archives to S3, and loads Redshift Serverless inside the default VPC; GitHub Actions deploys through an OIDC role](assets/aws-infra.png)
 
 ### One sale, end to end
 
@@ -89,7 +91,7 @@ from here on.
 
 ## Data model
 
-![Star schema: three dimensions, three fact tables, and a bridge table, with primary and foreign keys](assets/star_schema.png)
+![Star schema: three dimensions, three fact tables, and a bridge table, with primary and foreign keys](assets/star-schema.png)
 
 | Table | Grain |
 |---|---|
@@ -103,7 +105,7 @@ from here on.
 
 dbt builds the warehouse from one staging view, in dependency order:
 
-![dbt lineage: raw_data source to the stg_sales view to seven warehouse tables](assets/dbt_lineage.png)
+![dbt lineage: raw_data source to the stg_sales view to seven warehouse tables](assets/dbt-lineage.png)
 
 ### Design decisions
 
@@ -189,7 +191,7 @@ pushes it to ECR, and registers a new task-definition revision, which the schedu
 picks up on its next run. Earlier revisions stay registered, so rolling back means
 pointing the schedule at an older one.
 
-![CI/CD: a push or pull request runs the Tests job; on main, Build and push assumes the deploy role through OIDC, pushes the image to ECR, and registers a task-definition revision](assets/github_actions.png)
+![CI/CD: a push or pull request runs the Tests job; on main, Build and push assumes the deploy role through OIDC, pushes the image to ECR, and registers a task-definition revision](assets/github-actions.png)
 
 ## Cost
 
@@ -203,7 +205,7 @@ $0.40 a month, storage, and compute billed only while a run is active.
 
 ## What Sakura-Con 2026 showed
 
-![Analytics dashboard](docs/dashboards/analytics-dashboard.png)
+![Sakura-Con 2026 analytics dashboard](dashboards/sakura-con-2026-analytics-dashboard.png)
 
 - **Handmade goods brought in 30% of revenue;** blindbags were the volume line, at
   48 of 126 units.
@@ -265,8 +267,9 @@ python -m pytest tests/ -v
 ├── dbt/                 staging and warehouse models, tests, macros
 ├── tests/               offline pytest suites
 ├── infra/               provisioning, deploy, schedule, and OIDC scripts
-├── assets/              architecture, infrastructure, lineage, CI/CD, and schema diagrams
-├── docs/                setup and deployment guides, dashboard screenshots
+├── assets/              architecture, AWS, lineage, CI/CD, and star-schema diagrams
+├── dashboards/          dashboard screenshots, named by convention
+├── docs/                setup, deployment, and dashboard design guides
 ├── .github/workflows/   CI and deploy
 └── Dockerfile           multi-stage build, runs as a non-root user
 ```
